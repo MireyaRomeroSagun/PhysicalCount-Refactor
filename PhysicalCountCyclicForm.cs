@@ -6028,7 +6028,6 @@ namespace Persal._003_Physical_Counting_2
 
 
         /// <summary>
-        /// <summary>
         /// Asegura que existen snapshots para el conteo actual.
         /// Si no existen los genera llamando al repositorio.
         /// Devuelve false si no se encontraron movimientos.
