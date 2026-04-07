@@ -117,12 +117,12 @@ namespace Persal._003_Physical_Counting_2
 
         /// <summary>
         /// Obtiene el ID del almacén predeterminado para conteo físico.
-        /// Delega en Persal.System_Functions.Return_Default_Warehouse_Location_ID_For_Count().
+        /// Delega en la función escalar dbo.Return_Default_Warehouse_Location_ID_For_Count().
         /// </summary>
         /// <returns>ID del almacén predeterminado.</returns>
         public int ObtenerAlmacenPredeterminado()
         {
-            // Nota: delega en Persal.System_Functions para obtener la ubicación predeterminada.
+            // Nota: delega en la función escalar dbo.Return_Default_Warehouse_Location_ID_For_Count().
             const string sql = @"
                 SELECT dbo.Return_Default_Warehouse_Location_ID_For_Count()";
 
@@ -222,9 +222,9 @@ namespace Persal._003_Physical_Counting_2
 
             for (int i = 0; i < listaIds.Count; i++)
             {
-                string nombre = "@area" + i;
-                placeholders.Add(nombre);
-                parametros.Add(new SqlParameter(nombre, listaIds[i]));
+                string parameterName = "@area" + i;
+                placeholders.Add(parameterName);
+                parametros.Add(new SqlParameter(parameterName, listaIds[i]));
             }
 
             string sql = $@"
@@ -646,7 +646,7 @@ namespace Persal._003_Physical_Counting_2
             const string sql = @"
                 SELECT DISTINCT
                     s.Location_ID,
-                    l.Location_Name AS [Location Name]
+                    l.Location_Name
                 FROM dbo.Physical_Count_Snapshots s
                 INNER JOIN dbo.Locations l ON l.Location_ID = s.Location_ID
                 WHERE s.Physical_Count_ID = @p1
