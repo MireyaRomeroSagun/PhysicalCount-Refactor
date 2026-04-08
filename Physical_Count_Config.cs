@@ -73,7 +73,11 @@ namespace Persal._003_Physical_Counting_2
         private DataGridView _dgvLocacion;
         private HashSet<int> _checkedAreas = new HashSet<int>();
         private HashSet<int> _checkedLocaciones = new HashSet<int>();
-        private readonly int _almacenFijoId = 3;
+
+        // ID fijo del almacén raíz (WAREHOUSE SUPPLIES). Se define aquí para evitar
+        // el uso de literales "magic number" dispersos en el código.
+        private const int DEFAULT_WAREHOUSE_ID = 3;
+        private readonly int _almacenFijoId = DEFAULT_WAREHOUSE_ID;
 
         // --- Controles del detalle ---
         private TextBox _txtNombre;
@@ -803,7 +807,8 @@ namespace Persal._003_Physical_Counting_2
                 if (row["Proximo_Inventario"] != DBNull.Value)
                     _dtpProximo.Value = Convert.ToDateTime(row["Proximo_Inventario"]);
 
-                // Si ya tiene un último inventario, la fecha próxima no es editable
+                // Si ya tiene un último inventario, la fecha próxima no es editable:
+                // se calcula automáticamente como FechaUltimo + Intervalo_Dias al crear inventario
                 bool tienePcAnterior = row["Ultimo_PC_Id"] != DBNull.Value;
                 _dtpProximo.Enabled = !tienePcAnterior;
 
@@ -1215,11 +1220,8 @@ namespace Persal._003_Physical_Counting_2
 
         private int ObtenerAreaDeLocacion(int locacionId)
         {
-            // Buscar en el grid de locaciones qué área corresponde
-            // Se determina por las áreas marcadas
-            if (_checkedAreas.Count == 1) return _checkedAreas.First();
-
-            // Si hay múltiples áreas, buscar en BD
+            // Siempre consultar la BD para obtener el área padre real de la locación,
+            // evitando suposiciones incorrectas cuando hay múltiples áreas marcadas
             try
             {
                 string sql = "SELECT Parent_Location_ID FROM dbo.Locations WHERE Location_ID = @p1";
@@ -1250,11 +1252,21 @@ namespace Persal._003_Physical_Counting_2
                 if (dt == null) return;
 
                 if (string.IsNullOrEmpty(texto))
+                {
                     dt.DefaultView.RowFilter = "";
+                }
                 else
-                    dt.DefaultView.RowFilter = string.Format("Location_Name LIKE '%{0}%'", texto.Replace("'", "''"));
+                {
+                    // Escapar caracteres especiales para el filtro de DataView:
+                    // se escapa la comilla simple y los caracteres comodín [ y %
+                    string textoBusqueda = texto
+                        .Replace("'", "''")
+                        .Replace("[", "[[]")
+                        .Replace("%", "[%]");
+                    dt.DefaultView.RowFilter = string.Format("Location_Name LIKE '%{0}%'", textoBusqueda);
+                }
             }
-            catch { }
+            catch { /* No interrumpir la UI si falla el filtro */ }
         }
 
         private Color ColorDesdeHex(string hex)
@@ -1572,7 +1584,8 @@ namespace Persal._003_Physical_Counting_2
                 SELECT c.Id, c.Nombre, c.Intervalo_Dias, c.Color_Hex,
                        c.Fecha_Base, c.Proximo_Inventario, c.Ultimo_PC_Id,
                        c.Creado_Por, c.Creado_En,
-                       CASE WHEN c.Proximo_Inventario <= GETDATE() THEN 1 ELSE 0 END AS Vencido
+                       -- Comparación con DATE para evitar diferencias de hora (Proximo_Inventario es DATE)
+                       CASE WHEN c.Proximo_Inventario <= CAST(GETDATE() AS DATE) THEN 1 ELSE 0 END AS Vencido
                 FROM dbo.PC_Config c
                 WHERE c.Activo = 1 AND c.Creado_Por = @p1
                 ORDER BY c.Proximo_Inventario ASC";
@@ -1866,7 +1879,8 @@ namespace Persal._003_Physical_Counting_2
                 SELECT Id, Nombre, Proximo_Inventario
                 FROM dbo.PC_Config
                 WHERE Activo = 1 AND Creado_Por = @p1
-                  AND Proximo_Inventario <= GETDATE()
+                  -- Comparación con DATE para evitar diferencias de hora (Proximo_Inventario es DATE)
+                  AND Proximo_Inventario <= CAST(GETDATE() AS DATE)
                 ORDER BY Proximo_Inventario ASC";
 
             return EjecutarTabla(sql, usuarioId);
@@ -1892,7 +1906,8 @@ namespace Persal._003_Physical_Counting_2
                 // 2. Crear el encabezado del inventario usando Save_Physical_Count
                 var sf = new Persal.System_Functions();
                 int warehouseId = sf.Return_Default_Warehouse_Location_ID_For_Count();
-                if (warehouseId <= 0) warehouseId = 3;
+                // Fallback al almacén raíz fijo si no se puede determinar el almacén por defecto
+                if (warehouseId <= 0) warehouseId = Physical_Count_Config.DEFAULT_WAREHOUSE_ID;
 
                 // Fechas del inventario
                 DateTime fechaInicio = DateTime.Today;
@@ -1919,10 +1934,14 @@ namespace Persal._003_Physical_Counting_2
                     return false;
                 }
 
-                // 3. Recuperar el ID generado
+                // 3. Recuperar el ID generado — se agrega filtro de tiempo (últimos 2 minutos)
+                //    para reducir el riesgo en escenarios concurrentes donde múltiples
+                //    usuarios crean inventarios al mismo tiempo
                 using (var conn = new SqlConnection(ObtenerCs()))
                 using (var cmd = new SqlCommand(
-                    "SELECT TOP 1 Physical_Count_ID FROM Physical_Counts WHERE Created_By_User_ID = @p1 ORDER BY Physical_Count_ID DESC",
+                    "SELECT TOP 1 Physical_Count_ID FROM Physical_Counts " +
+                    "WHERE Created_By_User_ID = @p1 AND Physical_Count_DateTime >= DATEADD(minute, -2, GETDATE()) " +
+                    "ORDER BY Physical_Count_ID DESC",
                     conn))
                 {
                     cmd.Parameters.AddWithValue("@p1", usuarioId);
@@ -1940,9 +1959,8 @@ namespace Persal._003_Physical_Counting_2
                     conn.Open();
                     foreach (DataRow loc in locaciones.Rows)
                     {
-                        int locId = loc["Locacion_Id"] != DBNull.Value ? Convert.ToInt32(loc["Locacion_Id"]) :
-                                    loc["Area_Id"] != DBNull.Value ? Convert.ToInt32(loc["Area_Id"]) :
-                                    Convert.ToInt32(loc["Almacen_Id"]);
+                        // Determinar el ID de locación efectivo según la jerarquía disponible
+                        int locId = ObtenerLocacionIdEfectivo(loc);
 
                         using (var cmd = new SqlCommand("dbo.sp_PC_SaveSelectedLocationRow", conn))
                         {
@@ -1956,9 +1974,10 @@ namespace Persal._003_Physical_Counting_2
                 }
 
                 // 5. Actualizar Ultimo_PC_Id y Proximo_Inventario en la programación
+                // Se usa CAST(GETDATE() AS DATE) para trabajar con fechas sin hora
                 using (var conn = new SqlConnection(ObtenerCs()))
                 using (var cmd = new SqlCommand(
-                    "UPDATE dbo.PC_Config SET Ultimo_PC_Id = @p1, Proximo_Inventario = DATEADD(day, Intervalo_Dias, GETDATE()) WHERE Id = @p2",
+                    "UPDATE dbo.PC_Config SET Ultimo_PC_Id = @p1, Proximo_Inventario = DATEADD(day, Intervalo_Dias, CAST(GETDATE() AS DATE)) WHERE Id = @p2",
                     conn))
                 {
                     cmd.Parameters.AddWithValue("@p1", pcId);
@@ -1982,6 +2001,22 @@ namespace Persal._003_Physical_Counting_2
         // =====================================================================
         // Helpers internos
         // =====================================================================
+
+        /// <summary>
+        /// Determina el ID de locación efectivo de una fila de PC_Config_Locaciones.
+        /// Prioridad: Locacion_Id > Area_Id > Almacen_Id
+        /// </summary>
+        private static int ObtenerLocacionIdEfectivo(DataRow loc)
+        {
+            if (loc["Locacion_Id"] != DBNull.Value)
+                return Convert.ToInt32(loc["Locacion_Id"]);
+
+            if (loc["Area_Id"] != DBNull.Value)
+                return Convert.ToInt32(loc["Area_Id"]);
+
+            return Convert.ToInt32(loc["Almacen_Id"]);
+        }
+
         private DataTable EjecutarTabla(string sql, params object[] args)
         {
             var dt = new DataTable();
