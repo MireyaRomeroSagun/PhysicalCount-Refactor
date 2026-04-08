@@ -104,6 +104,8 @@ namespace Persal._003_Physical_Counting_2
         /// <summary>Constructor principal — recibe la cadena de conexión.</summary>
         public Physical_Count_Config(string connectionString)
         {
+            // Cuando connectionString es nulo o vacío, el repositorio y los helpers
+            // intentarán obtener la conexión desde el objeto global 'con()' del proyecto.
             _connectionString = connectionString ?? "";
             _repoConfig = new PC_ConfigRepository(_connectionString);
             _usuarioActual = ObtenerUsuarioActual();
@@ -1085,7 +1087,9 @@ namespace Persal._003_Physical_Counting_2
                         MessageBox.Show("Inventory created successfully. Opening wizard...", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
                         try
                         {
-                            var wizard = new PhysicalCountCyclicForm(_connectionString, pcId, 1);
+                            // Se abre en el paso 1 para que el usuario designe el responsable
+                            const int PASO_INICIAL_WIZARD = 1;
+                            var wizard = new PhysicalCountCyclicForm(_connectionString, pcId, PASO_INICIAL_WIZARD);
                             wizard.ShowDialog(this);
                         }
                         catch (Exception ex)
@@ -1258,11 +1262,13 @@ namespace Persal._003_Physical_Counting_2
                 else
                 {
                     // Escapar caracteres especiales para el filtro de DataView:
-                    // se escapa la comilla simple y los caracteres comodín [ y %
+                    // se escapan comilla simple, comodines [ ] % y el comodín de un carácter _
                     string textoBusqueda = texto
                         .Replace("'", "''")
                         .Replace("[", "[[]")
-                        .Replace("%", "[%]");
+                        .Replace("]", "[]]")
+                        .Replace("%", "[%]")
+                        .Replace("_", "[_]");
                     dt.DefaultView.RowFilter = string.Format("Location_Name LIKE '%{0}%'", textoBusqueda);
                 }
             }
@@ -1559,6 +1565,10 @@ namespace Persal._003_Physical_Counting_2
     internal sealed class PC_ConfigRepository
     {
         private readonly string _cs;
+
+        // ID del almacén raíz fijo (WAREHOUSE SUPPLIES).
+        // Se define localmente para que el repositorio no dependa de la clase form.
+        private const int DEFAULT_ROOT_WAREHOUSE_ID = 3;
 
         public PC_ConfigRepository(string connectionString)
         {
@@ -1906,8 +1916,9 @@ namespace Persal._003_Physical_Counting_2
                 // 2. Crear el encabezado del inventario usando Save_Physical_Count
                 var sf = new Persal.System_Functions();
                 int warehouseId = sf.Return_Default_Warehouse_Location_ID_For_Count();
-                // Fallback al almacén raíz fijo si no se puede determinar el almacén por defecto
-                if (warehouseId <= 0) warehouseId = Physical_Count_Config.DEFAULT_WAREHOUSE_ID;
+                // Fallback al ID del almacén raíz (WAREHOUSE SUPPLIES = 3) cuando el sistema
+                // no puede determinar el almacén por defecto
+                if (warehouseId <= 0) warehouseId = DEFAULT_ROOT_WAREHOUSE_ID;
 
                 // Fechas del inventario
                 DateTime fechaInicio = DateTime.Today;
