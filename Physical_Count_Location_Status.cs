@@ -24,6 +24,9 @@ namespace Persal._003_Physical_Counting_2
 
         private const int FormCornerRadius = 10;
 
+        // Warehouse root location ID (fixed — same as in PhysicalCountCyclicForm Step2FixedAlmacenId)
+        private const int WarehouseParentLocationId = 3;
+
         #endregion
 
         // =====================================================================
@@ -502,11 +505,11 @@ namespace Persal._003_Physical_Counting_2
 
             try
             {
-                const string sql = @"
+                string sql = string.Format(@"
 SELECT Location_ID, Location_Name
 FROM dbo.Locations
-WHERE Parent_Location_ID = 3
-ORDER BY Location_Name";
+WHERE Parent_Location_ID = {0}
+ORDER BY Location_Name", WarehouseParentLocationId);
 
                 using (var conn = new SqlConnection(GetCs()))
                 using (var cmd = new SqlCommand(sql, conn))
@@ -592,7 +595,7 @@ ORDER BY Period_Days ASC";
             catch { }
 
             var sbSql = new System.Text.StringBuilder();
-            sbSql.Append(@"
+            sbSql.Append(string.Format(@"
 SELECT
     L.Location_ID,
     L.Location_Name,
@@ -631,8 +634,8 @@ LEFT JOIN dbo.Physical_Counts PC
     AND PC.Physical_Count_Status_ID = 3
 WHERE L.Parent_Location_ID IN (
     SELECT Location_ID FROM dbo.Locations
-    WHERE Parent_Location_ID = 3
-)");
+    WHERE Parent_Location_ID = {0}
+)", WarehouseParentLocationId));
 
             if (areaId > 0)
                 sbSql.Append(" AND Parent.Location_ID = @areaId");
