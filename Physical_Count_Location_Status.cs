@@ -529,7 +529,7 @@ namespace Persal._003_Physical_Counting_2
                 VisibleIndex = 4
             };
 
-            // Próxima Vencimiento
+            // Próximo Vencimiento
             var colND = new GridColumn
             {
                 FieldName    = "Next_Due_Date",
