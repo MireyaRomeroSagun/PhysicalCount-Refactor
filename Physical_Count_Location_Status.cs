@@ -15,7 +15,7 @@ namespace Persal._003_Physical_Counting_2
     // =========================================================================
     // Physical_Count_Location_Status — Read-only report: location count status
     // =========================================================================
-    public class Physical_Count_Location_Status : Form
+    public partial class Physical_Count_Location_Status : Form
     {
         // =====================================================================
         // #region CONSTANTS
